@@ -1,0 +1,21 @@
+# Ignore big volumes of data
+data/
+postgres_data/
+minio_data/
+
+# Ignore environment varaibles for security reasons (Passwords, AWS Keys, etc.)
+.env
+*.env
+
+# Ignore python virtual environments
+venv/
+__pycache__/
+*.pyc
+
+# Metastore and checkpoints.
+.checkpoint/
+metastore_db/
+spark-warehouse/
+
+# Ignore OS-specific files
+.DS_Store
