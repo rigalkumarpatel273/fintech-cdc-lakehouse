@@ -1,0 +1,103 @@
+networks:
+  fintech_network:
+    driver: bridge
+
+services:
+  # 1. Transactional Database (OLTP with Logical Replication)
+  postgres_db:
+    image: debezium/postgres:15-alpine
+    container_name: fintech_postgres
+    environment:
+      - POSTGRES_USER=ledger_admin
+      - POSTGRES_PASSWORD=ledger_secret
+      - POSTGRES_DB=ledger_db
+    ports:
+      - "5432:5432"
+    networks:
+      - fintech_network
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=4"
+      - "-c"
+      - "max_replication_slots=4"
+    volumes:
+    - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # 2. Apache Kafka (KRaft Mode - Self-Managed Metadata)
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: fintech_kafka
+    ports:
+      - "9092:9092"
+    networks:
+      - fintech_network
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+
+  # 3. Debezium Connect (CDC Engine)
+  debezium:
+    image: debezium/connect:2.5
+    container_name: fintech_debezium
+    ports:
+      - "8083:8083"
+    networks:
+      - fintech_network
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:29092
+      - GROUP_ID=1
+      - CONFIG_STORAGE_TOPIC=ledger_connect_configs
+      - OFFSET_STORAGE_TOPIC=ledger_connect_offsets
+      - STATUS_STORAGE_TOPIC=ledger_connect_statuses
+      - CONFIG_STORAGE_REPLICATION_FACTOR=1
+      - OFFSET_STORAGE_REPLICATION_FACTOR=1
+      - STATUS_STORAGE_REPLICATION_FACTOR=1
+      - KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - KEY_CONVERTER_SCHEMAS_ENABLE=false
+      - VALUE_CONVERTER_SCHEMAS_ENABLE=false
+    depends_on:
+      - postgres_db
+      - kafka
+
+  # 4. MinIO (Local S3 Object Storage)
+  minio:
+    image: minio/minio:latest
+    container_name: fintech_minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI Console
+    networks:
+      - fintech_network
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=password123
+    command: server /data --console-address ":9001"
+
+  spark:
+    image: apache/spark:3.5.0
+    container_name: fintech_spark
+    user: root
+    command: ["tail", "-f", "/dev/null"]
+    volumes:
+      - ./:/opt/spark/work-dir
+    working_dir: /opt/spark/work-dir
+    networks:
+      - fintech_network
+    depends_on:
+      - kafka
+      - minio
