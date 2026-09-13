@@ -99,6 +99,26 @@ services:
     depends_on:
       - kafka
       - minio
+  
+  airflow:
+    image: apache/airflow:2.9.2-python3.10
+    container_name: fintech_airflow
+    command: standalone
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8080:8080"
+    user: "0:0"
+    networks:
+      - fintech_network
 
 # Top-level volumes (zero indentation)
 volumes:
