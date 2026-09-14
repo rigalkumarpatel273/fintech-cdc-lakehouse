@@ -67,10 +67,10 @@ envelope_schema = StructType([
 kafka_raw_df = (
     spark.readStream
     .format("kafka")
-    .option("kafka.bootstrap.servers", "fintech_kafka:9092")
+    .option("kafka.bootstrap.servers", "kafka:29092")
     .option("subscribe", "fintech.public.transactions")
     .option("startingOffsets", "earliest")
-    .option("failOnDataLoss", "false")  # <-- Add this line
+    .option("failOnDataLoss", "false")
     .load()
 )
 

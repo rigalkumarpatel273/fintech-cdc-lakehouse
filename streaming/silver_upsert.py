@@ -1,6 +1,6 @@
 import sys
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, coalesce, when, to_timestamp, row_number
+from pyspark.sql.functions import col, coalesce, when, to_timestamp, current_timestamp, row_number
 from pyspark.sql.window import Window
 from pyspark.sql.types import DecimalType
 from delta.tables import DeltaTable
@@ -16,12 +16,11 @@ spark.sparkContext.setLogLevel("WARN")
 
 bronze_path = "s3a://lakehouse/bronze/transactions"
 silver_path = "s3a://lakehouse/silver/transactions"
+quarantine_path = "s3a://lakehouse/quarantine/transactions"
 
 print("Reading raw records from Bronze layer...")
 bronze_df = spark.read.parquet(bronze_path)
 
-# 2. Extract fields with Deletion Awareness (coalesce after and before images)
-# For deletes (op: 'd'), after_image is NULL, so pull fields from before_image.
 # 2. Extract fields with Deletion Awareness (coalesce after and before images)
 cleaned_df = bronze_df.select(
     col("cdc_operation"),
@@ -65,17 +64,41 @@ cleaned_df = bronze_df.select(
     # Soft Delete Flag using cdc_operation
     when(col("cdc_operation") == "d", True).otherwise(False).alias("is_deleted"),
     col("ingested_at")
-).filter(col("transaction_id").isNotNull())
+)
 
-# 3. Deduplicate within the micro-batch / incoming slice
-# Keep only the latest event per transaction_id based on source_ts_ms
+# 3. Data Quality Gate & Quarantine Split
+reason_df = cleaned_df.withColumn(
+    "rejection_reason",
+    when(col("transaction_id").isNull(), "NULL_TRANSACTION_ID")
+    .when((col("amount").isNull()) | (col("amount") <= 0), "INVALID_AMOUNT")
+    .when(~col("status").isin("SETTLED", "PENDING", "REFUNDED"), "INVALID_STATUS")
+    .otherwise(None)
+)
+
+valid_df = reason_df.filter(col("rejection_reason").isNull()).drop("rejection_reason")
+
+quarantine_df = reason_df.filter(col("rejection_reason").isNotNull()) \
+    .withColumn("quarantined_at", current_timestamp())
+
+# Persist rejected records to Quarantine Delta Table (Append-only)
+if quarantine_df.rdd.isEmpty():
+    print("No corrupted records detected in this run.")
+else:
+    print(f"Quarantining corrupted records to {quarantine_path}...")
+    quarantine_df.write \
+        .format("delta") \
+        .mode("append") \
+        .save(quarantine_path)
+
+# 4. Deduplicate Valid Records within Incoming Micro-Batch
 window_spec = Window.partitionBy("transaction_id").orderBy(col("source_ts_ms").desc())
 
-latest_mutations = cleaned_df.withColumn("row_num", row_number().over(window_spec)) \
+latest_mutations = valid_df.withColumn("row_num", row_number().over(window_spec)) \
     .filter(col("row_num") == 1) \
     .drop("row_num")
 
-# 4. ACID Upsert into Delta Lake
+# 5. ACID Upsert into Silver Delta Lake
+# 5. ACID Upsert into Silver Delta Lake
 if not DeltaTable.isDeltaTable(spark, silver_path):
     print("Silver table does not exist. Initializing new Delta table...")
     latest_mutations.write \
@@ -83,6 +106,12 @@ if not DeltaTable.isDeltaTable(spark, silver_path):
         .mode("overwrite") \
         .save(silver_path)
     print("Silver table initialized.")
+
+    # Apply Delta invariants immediately after first initialization
+    print("Applying Delta invariants (CHECK constraints)...")
+    spark.sql(f"ALTER TABLE delta.`{silver_path}` ADD CONSTRAINT valid_amount CHECK (amount > 0)")
+    spark.sql(f"ALTER TABLE delta.`{silver_path}` ADD CONSTRAINT valid_transaction_id CHECK (transaction_id IS NOT NULL)")
+    print("Constraints applied successfully.")
 else:
     print("Merging mutations into existing Silver Delta table...")
     silver_table = DeltaTable.forPath(spark, silver_path)
@@ -121,8 +150,12 @@ else:
     ).execute()
     print("Merge completed successfully.")
 
-# 5. Display Current Silver Table State
-print("\n--- SILVER LAYER (CURRENT SNAPSHOT) ---")
+# 6. Display Table Snapshots
+print("\n--- SILVER LAYER (CLEAN SNAPSHOT) ---")
 spark.read.format("delta").load(silver_path).show(truncate=False)
+
+if DeltaTable.isDeltaTable(spark, quarantine_path):
+    print("\n--- QUARANTINE LAYER (REJECTED RECORDS) ---")
+    spark.read.format("delta").load(quarantine_path).show(truncate=False)
 
 spark.stop()
