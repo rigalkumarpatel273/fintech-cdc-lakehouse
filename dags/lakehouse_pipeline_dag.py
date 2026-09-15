@@ -4,6 +4,8 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 import requests
 
+
+
 default_args = {
     "owner": "data_engineering",
     "depends_on_past": False,
@@ -22,17 +24,20 @@ dag = DAG(
     max_active_runs=1,
 )
 
+# --- Configuration ---
+CONNECTOR_NAME = "postgres-ledger-connector"  # <-- Change your connector name here
+DEBEZIUM_HOST = "debezium"                     # Or your docker service name
+
 # 1. Healthcheck: Ensure Debezium connector is healthy
 def check_debezium_status():
-    # Update hostname from 'fintech_connect' to 'debezium'
-    url = "http://debezium:8083/connectors/fintech-postgres-connector/status"
+    url = f"http://{DEBEZIUM_HOST}:8083/connectors/{CONNECTOR_NAME}/status"
     resp = requests.get(url, timeout=10)
     if resp.status_code != 200:
-        raise RuntimeError(f"Debezium connector not reachable: {resp.status_code}")
+        raise RuntimeError(f"Debezium connector '{CONNECTOR_NAME}' not reachable: {resp.status_code}")
     state = resp.json().get("tasks", [{}])[0].get("state", "UNKNOWN")
     if state != "RUNNING":
         raise RuntimeError(f"Debezium task state is {state}, expected RUNNING")
-    print("Debezium connector is healthy and RUNNING.")
+    print(f"Debezium connector '{CONNECTOR_NAME}' is healthy and RUNNING.")
 
 task_check_cdc = PythonOperator(
     task_id="check_cdc_connector_health",
