@@ -19,3 +19,4 @@ spark-warehouse/
 
 # Ignore OS-specific files
 .DS_Store
+.duckdb_extensions/
