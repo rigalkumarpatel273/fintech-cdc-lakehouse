@@ -29,7 +29,32 @@ An enterprise-grade, event-driven Data Lakehouse built with Apache Kafka, Debezi
 │
 ▼
 [ DuckDB (Zero-Copy OLAP) ]
+---
 
+## System Verification & Operational Observability
+
+### 1. Storage Layout & Medallion Buckets (MinIO)
+Partitioned object store hosting Bronze, Silver, Gold, and Quarantine layers:
+![MinIO Object Storage](docs/images/minio-storage.png)
+
+### 2. Automated Pipeline Orchestration (Apache Airflow)
+End-to-end DAG execution managing connector health checks, Delta upserts, and metric rollups:
+![Airflow DAG Run](docs/images/airflow-dag.png)
+
+### 3. Defensive Data Quality: Quarantine vs. Silver Conformance
+Negative amount poison-pill records isolated with audit metadata, while valid transactions merge cleanly:
+
+| Poison Pills Isolated in Quarantine | Clean Conformed Silver Ledger |
+| :---: | :---: |
+| ![Quarantine Layer](docs/images/quarantine-layer.png) | ![Silver Layer](docs/images/silver-layer.png) |
+
+### 4. Curated Financial Aggregations (Gold Layer)
+Daily merchant-level settlement volumes, refund metrics, and net revenue recalculation:
+![Gold Aggregations](docs/images/gold-aggregations.png)
+
+### 5. Distributed Infrastructure Runtime
+Fully containerized microservices managed via Docker Compose:
+![Docker Infrastructure](docs/images/docker-services.png)
 ---
 
 ## Key Architectural Decisions & Engineering Highlights
