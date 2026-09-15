@@ -6,30 +6,31 @@ An enterprise-grade, event-driven Data Lakehouse built with Apache Kafka, Debezi
 
 ## Architecture Overview
 
+```text
 [ PostgreSQL (OLTP) ]
-│ (Write-Ahead Log / WAL)
-▼
+         │ (Write-Ahead Log / WAL)
+         ▼
 [ Debezium Connector ] ──(Logical Decoding: pgoutput)──► [ Apache Kafka (KRaft) ]
-│
-│ (Spark Structured Streaming)
-▼
-[ MinIO Object Storage (S3) ]
-├── Bronze: Raw CDC Stream (Parquet)
-│
-│ (Spark MERGE & Validation)
-├── Silver: Conformed Ledger (Delta Lake)
-│     ├── Valid Records (amount > 0)
-│     └── Soft Deletes (is_deleted = true)
-│
-├── Quarantine: Dead-Letter Queue (Delta Lake)
-│     └── Poison Pills (rejection_reason tagged)
-│
-│ (Spark Aggregation DAG)
-└── Gold: Merchant Financial KPIs (Delta Lake)
-│
-▼
-[ DuckDB (Zero-Copy OLAP) ]
----
+                                                                   │
+                                                                   │ (Spark Structured Streaming)
+                                                                   ▼
+                                                       [ MinIO Object Storage (S3) ]
+                                                       ├── Bronze: Raw CDC Stream (Parquet)
+                                                       │
+                                                       │ (Spark MERGE & Validation)
+                                                       ├── Silver: Conformed Ledger (Delta Lake)
+                                                       │     ├── Valid Records (amount > 0)
+                                                       │     └── Soft Deletes (is_deleted = true)
+                                                       │
+                                                       ├── Quarantine: Dead-Letter Queue (Delta Lake)
+                                                       │     └── Poison Pills (rejection_reason tagged)
+                                                       │
+                                                       │ (Spark Aggregation DAG)
+                                                       └── Gold: Merchant Financial KPIs (Delta Lake)
+                                                                   │
+                                                                   ▼
+                                                        [ DuckDB (Zero-Copy OLAP) ]
+```
 
 ## System Verification & Operational Observability
 
@@ -86,6 +87,7 @@ Fully containerized microservices managed via Docker Compose:
 
 ## Directory Structure
 
+```text
 ├── dags/                          # Apache Airflow orchestration DAGs
 │   └── fintech_lakehouse_pipeline.py
 ├── scripts/                       # PySpark pipeline & load-testing scripts
@@ -98,4 +100,4 @@ Fully containerized microservices managed via Docker Compose:
 │   └── duckdbconnect.py          # Zero-copy DuckDB S3 query scripts
 ├── docker-compose.yml             # Full-stack container infrastructure
 └── README.md
-
+```
